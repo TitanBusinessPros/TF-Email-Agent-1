@@ -70,20 +70,13 @@
   <p><button id="sign-out-btn">Sign out</button></p>
 
   <h2>Controls</h2>
-  <p>
-    <button id="pause-toggle-btn">…</button>
-    <span id="pause-status" style="font-size:0.8rem;color:#666;"></span>
-  </p>
-  <details class="help"><summary>What does pause do?</summary>Skips the automatic sender every day (checked fresh each time, not just once) — use it for a day off. Never sends on Sundays either way.</details>
+  <details class="help"><summary>How do multiple agents work together?</summary>Each agent (Gmail account) has its own pause button and start time — but only one is ever allowed to actually be sending at a time, even if their start times overlap. If Agent B's time arrives while Agent A is still mid-batch, Agent B just waits and keeps checking every 15 min until Agent A finishes, then starts automatically. Never sends on Sundays either way, for any agent.</details>
+  <div id="agents-list"></div>
 
-  <label for="start-time" style="display:block;margin-top:0.5rem;font-weight:600;font-size:0.85rem;">Daily start time (Central)</label>
-  <p><input type="time" id="start-time" style="padding:0.3rem;border-radius:4px;border:1px solid #aaa;font-size:0.85rem;" /> <button id="save-start-time-btn">Save time</button></p>
-  <details class="help"><summary>How precise is this?</summary>First approved draft goes out within ~15 min after this time, then one more every 10 min until that day's approved drafts are done. Change any time — e.g. set to this afternoon to launch today instead of waiting for tomorrow.</details>
-
-  <label for="campaign-notes" style="display:block;margin-top:0.5rem;font-weight:600;font-size:0.85rem;">What are we selling right now?</label>
-  <details class="help" open><summary>Why this box exists</summary>Plain English, your own words. Claude reads this before writing each batch — update it whenever the pitch changes instead of re-explaining it in chat.</details>
+  <label for="campaign-notes" style="display:block;margin-top:0.5rem;font-weight:600;font-size:0.85rem;">What are we selling right now? <span id="campaign-notes-save-status" style="font-weight:normal;font-size:0.75rem;color:#888;"></span></label>
+  <details class="help" open><summary>Why this box exists</summary>Plain English, your own words. Claude reads this before writing each batch — update it whenever the pitch changes instead of re-explaining it in chat. Saves automatically a couple seconds after you stop typing — no button to remember to click.</details>
   <textarea id="campaign-notes" style="width:100%;min-height:4rem;padding:0.4rem;border-radius:4px;border:1px solid #aaa;font-family:inherit;font-size:0.85rem;"></textarea>
-  <p><button id="save-settings-btn">Save</button> <span id="settings-message"></span></p>
+  <div id="settings-message"></div>
 
   <h2>Add a lead</h2>
   <details class="help"><summary>What's this for?</summary>Anyone you know about yourself — shows up in the candidate list, same as the old leads.csv.</details>
@@ -213,70 +206,112 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 // ---------------------------------------------------------------------
-// Controls: pause toggle + campaign notes
+// Controls: one card per agent (pause + start time), auto-saving
+// campaign notes. Agent list comes from the backend (outreachGetSettings)
+// so adding a 3rd/4th agent later just means a backend change, not
+// touching this page at all — a new card appears automatically.
 // ---------------------------------------------------------------------
-let currentPaused = false;
+let agentsState = []; // [{id, label, paused, startTime}]
 
-function renderPauseButton() {
-  const btn = document.getElementById("pause-toggle-btn");
-  const status = document.getElementById("pause-status");
-  if (currentPaused) {
-    btn.textContent = "▶ Resume sending";
-    status.textContent = "Currently PAUSED — the automatic sender will skip every day until you resume.";
-  } else {
-    btn.textContent = "⏸ Take a day off (pause)";
-    status.textContent = "Currently active — sending as normal (Mon–Sat only, never Sundays).";
+// Small reusable debounce: waits `ms` after the LAST call before actually
+// running `fn` — used so typing doesn't fire a save on every keystroke,
+// just a couple seconds after you stop, and also used as the actual
+// "auto-save so a crash doesn't lose your typing" behavior requested.
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
+function renderAgentCard(agent) {
+  const div = document.createElement("div");
+  div.style.cssText = "border:1px solid #ccc;border-radius:6px;padding:0.5rem 0.7rem;margin:0.4rem 0;";
+  div.dataset.agentId = agent.id;
+  div.innerHTML = `
+    <strong>${agent.label}</strong>
+    <button class="agent-pause-btn" style="margin-left:0.5rem;">…</button>
+    <span class="agent-pause-status" style="font-size:0.78rem;color:#666;"></span>
+    <br />
+    <label style="font-size:0.8rem;">Daily start (Central):
+      <input type="time" class="agent-start-time" style="padding:0.25rem;border-radius:4px;border:1px solid #aaa;font-size:0.8rem;" />
+    </label>
+    <span class="agent-time-status" style="font-size:0.75rem;color:#888;"></span>
+  `;
+
+  function renderPauseButton() {
+    const btn = div.querySelector(".agent-pause-btn");
+    const status = div.querySelector(".agent-pause-status");
+    if (agent.paused) {
+      btn.textContent = "▶ Resume";
+      status.textContent = "PAUSED — skips every day until resumed.";
+    } else {
+      btn.textContent = "⏸ Pause (day off)";
+      status.textContent = "Active (Mon–Sat, never Sundays).";
+    }
   }
+  renderPauseButton();
+  div.querySelector(".agent-start-time").value = agent.startTime;
+
+  div.querySelector(".agent-pause-btn").addEventListener("click", async () => {
+    try {
+      await setSettingsCallable({ agent: agent.id, paused: !agent.paused });
+      agent.paused = !agent.paused;
+      renderPauseButton();
+    } catch (err) {
+      showMessage(document.getElementById("settings-message"), err.message, "error");
+    }
+  });
+
+  const saveStartTime = debounce(async (value) => {
+    const statusEl = div.querySelector(".agent-time-status");
+    if (!value) return;
+    try {
+      await setSettingsCallable({ agent: agent.id, startTime: value });
+      statusEl.textContent = `Saved — lands within ~15 min after ${value}.`;
+    } catch (err) {
+      statusEl.textContent = `Error: ${err.message}`;
+    }
+  }, 1200);
+  div.querySelector(".agent-start-time").addEventListener("input", (e) => saveStartTime(e.target.value));
+
+  return div;
+}
+
+function renderAgentsList() {
+  const container = document.getElementById("agents-list");
+  container.innerHTML = "";
+  agentsState.forEach((agent) => container.appendChild(renderAgentCard(agent)));
 }
 
 async function loadSettings() {
   try {
     const { data } = await getSettingsCallable();
-    currentPaused = !!data.paused;
+    agentsState = data.agents || [];
     document.getElementById("campaign-notes").value = data.campaignNotes || "";
-    document.getElementById("start-time").value = data.startTime || "09:00";
-    renderPauseButton();
+    renderAgentsList();
   } catch (err) {
     showMessage(document.getElementById("settings-message"), err.message, "error");
   }
 }
 
-document.getElementById("pause-toggle-btn").addEventListener("click", async () => {
-  const msg = document.getElementById("settings-message");
+// Auto-save campaign notes ~1.5s after the last keystroke — this is the
+// "don't lose 60 businesses' worth of typing to a power outage" behavior
+// requested, applied here too (was previously a manual Save button with
+// the exact same risk).
+const saveCampaignNotes = debounce(async (value) => {
+  const statusEl = document.getElementById("campaign-notes-save-status");
+  statusEl.textContent = "Saving…";
   try {
-    await setSettingsCallable({ paused: !currentPaused });
-    currentPaused = !currentPaused;
-    renderPauseButton();
-    showMessage(msg, "Saved.", "info");
+    await setSettingsCallable({ campaignNotes: value });
+    statusEl.textContent = "Saved ✓";
+    setTimeout(() => { if (statusEl.textContent === "Saved ✓") statusEl.textContent = ""; }, 2000);
   } catch (err) {
-    showMessage(msg, err.message, "error");
+    statusEl.textContent = `Not saved: ${err.message}`;
   }
-});
-
-document.getElementById("save-start-time-btn").addEventListener("click", async () => {
-  const msg = document.getElementById("settings-message");
-  const startTime = document.getElementById("start-time").value; // "HH:MM" from the native time input
-  if (!startTime) {
-    showMessage(msg, "Pick a time first.", "error");
-    return;
-  }
-  try {
-    await setSettingsCallable({ startTime });
-    showMessage(msg, `Saved — the sender checks every 15 minutes, so today's/tomorrow's first send will land within about 15 minutes after ${startTime} Central.`, "info");
-  } catch (err) {
-    showMessage(msg, err.message, "error");
-  }
-});
-
-document.getElementById("save-settings-btn").addEventListener("click", async () => {
-  const msg = document.getElementById("settings-message");
-  try {
-    await setSettingsCallable({ campaignNotes: document.getElementById("campaign-notes").value });
-    showMessage(msg, "Saved.", "info");
-  } catch (err) {
-    showMessage(msg, err.message, "error");
-  }
-});
+}, 1500);
+document.getElementById("campaign-notes").addEventListener("input", (e) => saveCampaignNotes(e.target.value));
 
 // ---------------------------------------------------------------------
 // Add a lead manually
@@ -352,15 +387,22 @@ function renderCandidatesTable(candidates, wrapId, opts) {
   wrap.innerHTML = `<table class="candidates"><thead><tr>${headCheck}<th class="col-company">Company</th><th class="col-phone">Phone</th><th class="col-website">Website</th><th class="col-address">Address</th><th class="col-email">Email</th><th class="col-town">Town</th></tr></thead><tbody>${rows}</tbody></table>`;
 
   if (opts.editableEmail) {
+    // Auto-save ~1.2s after typing stops, not just on blur — so a crash
+    // or lost power mid-review doesn't wipe out emails you already typed
+    // in but hadn't clicked away from yet.
     wrap.querySelectorAll(".cand-email").forEach((input) => {
-      input.addEventListener("change", async () => {
+      const save = debounce(async () => {
         const id = input.closest("tr").dataset.id;
         try {
           await updateCandidateCallable({ id, email: input.value.trim() });
+          input.style.borderColor = "#1a7a1a";
+          setTimeout(() => { input.style.borderColor = ""; }, 800);
         } catch (err) {
-          alert(`Couldn't save that email: ${err.message}`);
+          input.style.borderColor = "#b3261e";
+          input.title = `Not saved: ${err.message}`;
         }
-      });
+      }, 1200);
+      input.addEventListener("input", save);
     });
   }
 }
