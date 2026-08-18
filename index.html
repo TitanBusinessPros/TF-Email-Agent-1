@@ -100,6 +100,7 @@
   <h2>Review new businesses <button id="load-candidates-btn" style="font-weight:normal;">Refresh</button></h2>
   <details class="help"><summary>What do I do here?</summary>Check the good ones and add them to this week's queue. Anything unchecked just stays here — nothing's discarded unless you click "Reject checked." Emails are editable — fill one in if you look it up yourself.</details>
   <div id="candidates-message"></div>
+  <p><button class="select-all-btn" data-target="candidates-table-wrap" style="display:none;">Select all</button> <button class="deselect-all-btn" data-target="candidates-table-wrap" style="display:none;">Deselect all</button></p>
   <div id="candidates-table-wrap" style="overflow-x:auto;"></div>
   <p>
     <button class="primary" id="queue-checked-btn" style="display:none;">Add checked to queue</button>
@@ -109,6 +110,7 @@
   <h2>This week's queue</h2>
   <details class="help"><summary>What is this?</summary>Approved businesses waiting to be drafted — feeds into "Today's leads to draft" below automatically. Emails are editable here too — add one in for anyone missing it.</details>
   <div id="queue-message"></div>
+  <p><button class="select-all-btn" data-target="queue-table-wrap" style="display:none;">Select all</button> <button class="deselect-all-btn" data-target="queue-table-wrap" style="display:none;">Deselect all</button></p>
   <div id="queue-table-wrap" style="overflow-x:auto;"></div>
   <p><button id="unqueue-checked-btn" style="display:none;">Remove checked from queue</button></p>
 
@@ -120,6 +122,8 @@
     <option value="secondary">pollysfarmok@gmail.com</option>
   </select>
   <button class="primary" id="load-leads-btn">Load today's leads</button>
+  <button id="select-all-leads-btn" style="display:none;">Select all</button>
+  <button id="deselect-all-leads-btn" style="display:none;">Deselect all</button>
   <div id="leads-message"></div>
   <div id="leads-container"></div>
   <p><button class="primary" id="create-drafts-btn" style="display:none;">Create drafts for checked leads</button></p>
@@ -407,6 +411,18 @@ function renderCandidatesTable(candidates, wrapId, opts) {
   }
 }
 
+// Shared by the Review and Queue tables — one delegated listener instead
+// of duplicating click handlers per table.
+function setAllChecksIn(wrapId, checked) {
+  document.querySelectorAll(`#${wrapId} .cand-check`).forEach((cb) => (cb.checked = checked));
+}
+document.querySelectorAll(".select-all-btn").forEach((btn) => btn.addEventListener("click", () => setAllChecksIn(btn.dataset.target, true)));
+document.querySelectorAll(".deselect-all-btn").forEach((btn) => btn.addEventListener("click", () => setAllChecksIn(btn.dataset.target, false)));
+function toggleSelectAllButtons(wrapId, show) {
+  document.querySelectorAll(`.select-all-btn[data-target="${wrapId}"], .deselect-all-btn[data-target="${wrapId}"]`)
+    .forEach((btn) => (btn.style.display = show ? "inline-block" : "none"));
+}
+
 async function loadCandidates() {
   const msg = document.getElementById("candidates-message");
   const queueBtn = document.getElementById("queue-checked-btn");
@@ -418,6 +434,7 @@ async function loadCandidates() {
     const has = data.candidates.length > 0;
     queueBtn.style.display = has ? "inline-block" : "none";
     rejectBtn.style.display = has ? "inline-block" : "none";
+    toggleSelectAllButtons("candidates-table-wrap", has);
   } catch (err) {
     showMessage(msg, err.message, "error");
   }
@@ -473,6 +490,7 @@ async function loadQueue() {
       "info"
     );
     unqueueBtn.style.display = data.candidates.length > 0 ? "inline-block" : "none";
+    toggleSelectAllButtons("queue-table-wrap", data.candidates.length > 0);
   } catch (err) {
     showMessage(msg, err.message, "error");
   }
@@ -495,10 +513,54 @@ document.getElementById("unqueue-checked-btn").addEventListener("click", async (
 // ---------------------------------------------------------------------
 // Load today's candidate leads (Checkpoint 1 — nothing recorded yet)
 // ---------------------------------------------------------------------
+// Source-aware — this is the fix for the real bug where every lead got
+// the same "you started a listing but never finished it" line, which is
+// simply false for anyone who's never touched Town Fuss (town-search,
+// manually-added, or CSV leads). Only leads with source
+// "unpaid-business-listing" have actually started something on Town Fuss
+// — every other source gets a cold-intro opener instead, and neither
+// variant claims anything that isn't true for that specific lead.
+//
+// The actual offer details below (pricing, Dec 1 deadline, Oklahoma-only)
+// are written to match what's currently in the "What are we selling" box
+// — if you change the pricing/offer there, these need a matching manual
+// update too, since this is a hand-written template, not a live rewrite
+// pulling from that box on every send.
+function pickVariant(lead, options) {
+  // Deterministic per-lead (not random) so re-loading the same lead
+  // twice shows the same variant, but different leads in the same batch
+  // don't all read identically — a real anti-spam-pattern reason, not
+  // just for its own sake.
+  const seed = (lead.email || lead.name || "").split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  return options[seed % options.length];
+}
+
+function defaultSubject(lead) {
+  if (lead.source === "unpaid-business-listing") {
+    return pickVariant(lead, ["Finish setting up your Town Fuss listing?", "Your Town Fuss listing — still want to finish it?"]);
+  }
+  return pickVariant(lead, ["Quick intro — Town Fuss (Oklahoma)", `Town Fuss in ${lead.town || "your area"} — worth a look?`]);
+}
+
 function defaultBody(lead) {
-  const town = lead.town ? ` in ${lead.town}` : "";
   const name = lead.name || "there";
-  return `Hi ${name},\n\nI noticed your business${town} started a listing on Town Fuss but never finished it up. Town Fuss is a local community app — I'd love to help you get it live, and answer any questions on a quick call if that's useful.\n\nWorth 10 minutes this week?\n\nThanks,\nTitan Business Pros`;
+  const townPhrase = lead.town ? ` in ${lead.town}` : "";
+  const offer =
+    "Town Fuss is a social media platform exclusive to Oklahoma. Businesses can list themselves in the local directory for $12/year, or go bigger by sponsoring their town's chat room — your logo at the top, marked as the sponsor — for $50/month through December 1st (then $100/month after that).";
+
+  if (lead.source === "unpaid-business-listing") {
+    const opening = pickVariant(lead, [
+      `I noticed your business${townPhrase} started a listing on Town Fuss but never finished it up.`,
+      `Looks like you started setting up a Town Fuss listing${townPhrase} a while back but didn't get to finish it.`,
+    ]);
+    return `Hi ${name},\n\n${opening} ${offer}\n\nWant me to help you finish it up, or answer any questions on a quick call?\n\nThanks,\nTitan Business Pros`;
+  }
+
+  const opening = pickVariant(lead, [
+    `I wanted to introduce you to Town Fuss${townPhrase ? `, active${townPhrase}` : ""}.`,
+    `Reaching out to introduce Town Fuss${townPhrase ? ` to businesses${townPhrase}` : ""}.`,
+  ]);
+  return `Hi ${name},\n\n${opening} ${offer}\n\nWould a quick call make sense to see if it's a fit?\n\nThanks,\nTitan Business Pros`;
 }
 
 document.getElementById("load-leads-btn").addEventListener("click", async () => {
@@ -527,7 +589,7 @@ document.getElementById("load-leads-btn").addEventListener("click", async () => 
       card.innerHTML = `
         <label><input type="checkbox" class="lead-check" checked /> <strong>${lead.name || "(no name)"}</strong> — ${lead.email} — ${lead.town || "no town listed"} <span style="color:#888;">[${lead.source}]</span></label>
         <div class="lead-meta"></div>
-        <input type="text" class="lead-subject" value="Quick question about your Town Fuss listing" />
+        <input type="text" class="lead-subject" value="${defaultSubject(lead).replace(/"/g, "&quot;")}" />
         <textarea class="lead-body">${defaultBody(lead)}</textarea>
         <div class="lead-status"></div>
       `;
@@ -537,10 +599,21 @@ document.getElementById("load-leads-btn").addEventListener("click", async () => 
     });
 
     createBtn.style.display = "inline-block";
+    document.getElementById("select-all-leads-btn").style.display = "inline-block";
+    document.getElementById("deselect-all-leads-btn").style.display = "inline-block";
   } catch (err) {
     showMessage(msg, err.message, "error");
   }
 });
+
+function setAllLeadChecks(checked) {
+  document.querySelectorAll(".lead-card .lead-check").forEach((cb) => {
+    cb.checked = checked;
+    cb.dispatchEvent(new Event("change"));
+  });
+}
+document.getElementById("select-all-leads-btn").addEventListener("click", () => setAllLeadChecks(true));
+document.getElementById("deselect-all-leads-btn").addEventListener("click", () => setAllLeadChecks(false));
 
 // ---------------------------------------------------------------------
 // Create drafts for whichever cards are still checked (Checkpoint 2 setup —
