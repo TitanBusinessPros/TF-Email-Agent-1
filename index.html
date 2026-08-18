@@ -24,6 +24,10 @@
   .lead-status.err { color: #b3261e; }
   #manual-form { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
   #manual-form input { padding: 0.4rem; border-radius: 4px; border: 1px solid #aaa; }
+  table.candidates { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  table.candidates th, table.candidates td { border: 1px solid #ccc; padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
+  table.candidates input[type="text"] { width: 100%; box-sizing: border-box; padding: 0.2rem; border: 1px solid #ccc; border-radius: 3px; font-size: 0.85rem; }
+  table.candidates .no-email { color: #a3282f; font-style: italic; }
   .message { padding: 0.6rem 0.9rem; border-radius: 6px; margin: 0.75rem 0; }
   .message.error { background: #fbe4e2; color: #7a1f18; }
   .message.info { background: #e3edfb; color: #1a3d7a; }
@@ -78,7 +82,40 @@
   </form>
   <div id="manual-message"></div>
 
-  <h2>Today's candidates</h2>
+  <h2>Find businesses in a town</h2>
+  <p style="font-size:0.9rem;color:#666;">
+    Searches real businesses via Google — company name, phone, website, address, and
+    an email ONLY if one is actually found on the business's own site (never guessed).
+    Results land below for you to review before anything's queued.
+  </p>
+  <form id="generate-form" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+    <input type="text" id="generate-town" placeholder="Town or city, e.g. Guthrie, OK" required style="flex:1;min-width:200px;padding:0.4rem;border-radius:4px;border:1px solid #aaa;" />
+    <button type="submit" class="primary">Find 60 businesses</button>
+  </form>
+  <div id="generate-message"></div>
+
+  <h2>Review new businesses</h2>
+  <p style="font-size:0.9rem;color:#666;">
+    Check the good ones and add them to this week's queue. Anything you don't check
+    just stays here — nothing is discarded unless you click "Reject checked."
+    <button id="load-candidates-btn" style="margin-left:0.5rem;">Refresh list</button>
+  </p>
+  <div id="candidates-message"></div>
+  <div id="candidates-table-wrap" style="overflow-x:auto;"></div>
+  <p>
+    <button class="primary" id="queue-checked-btn" style="display:none;">Add checked to this week's queue</button>
+    <button id="reject-checked-btn" style="display:none;">Reject checked</button>
+  </p>
+
+  <h2>This week's queue</h2>
+  <p style="font-size:0.9rem;color:#666;">
+    Approved businesses waiting to be drafted — these feed into "Today's leads to draft"
+    below automatically, alongside unpaid Town Fuss listings and anything you added manually.
+  </p>
+  <div id="queue-message"></div>
+  <div id="queue-table-wrap" style="overflow-x:auto;"></div>
+
+  <h2>Today's leads to draft</h2>
   <p style="font-size:0.9rem;color:#666;">
     Checkpoint 1: nothing below is sent or recorded as "contacted" yet. Uncheck anyone
     you don't want to contact, edit the subject/body for anyone you keep, then use
@@ -125,6 +162,10 @@ const addManualLeadCallable = httpsCallable(functions, "outreachAddManualLead");
 const createDraftCallable = httpsCallable(functions, "outreachCreateDraft");
 const getSettingsCallable = httpsCallable(functions, "outreachGetSettings");
 const setSettingsCallable = httpsCallable(functions, "outreachSetSettings");
+const generateLeadsCallable = httpsCallable(functions, "outreachGenerateLeads");
+const listCandidatesCallable = httpsCallable(functions, "outreachListCandidates");
+const setCandidateStatusCallable = httpsCallable(functions, "outreachSetCandidateStatus");
+const updateCandidateCallable = httpsCallable(functions, "outreachUpdateCandidate");
 
 const signedOutEl = document.getElementById("signed-out");
 const notAdminEl = document.getElementById("not-admin");
@@ -164,6 +205,8 @@ onAuthStateChanged(auth, async (user) => {
   }
   appEl.style.display = "block";
   loadSettings();
+  loadCandidates();
+  loadQueue();
 });
 
 // ---------------------------------------------------------------------
@@ -237,6 +280,140 @@ document.getElementById("manual-form").addEventListener("submit", async (e) => {
 });
 
 // ---------------------------------------------------------------------
+// Town search — finds businesses, drops them in "candidate" status for review
+// ---------------------------------------------------------------------
+document.getElementById("generate-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById("generate-message");
+  const town = document.getElementById("generate-town").value.trim();
+  const btn = e.target.querySelector("button[type=submit]");
+  btn.disabled = true;
+  showMessage(msg, `Searching ${town}… this can take a minute (looking up each business's site for an email).`, "info");
+  try {
+    const { data } = await generateLeadsCallable({ town, count: 60 });
+    showMessage(msg, `Found ${data.created} business(es) in ${town}. Scroll down to "Review new businesses."`, "info");
+    loadCandidates();
+  } catch (err) {
+    showMessage(msg, err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------------
+// Review new businesses (status: candidate) — checkbox -> queue or reject
+// ---------------------------------------------------------------------
+function renderCandidatesTable(candidates, wrapId, opts) {
+  const wrap = document.getElementById(wrapId);
+  if (candidates.length === 0) {
+    wrap.innerHTML = "<p>Nothing here right now.</p>";
+    return;
+  }
+  const rows = candidates
+    .map((c) => {
+      const emailCell = opts.editableEmail
+        ? `<input type="text" class="cand-email" value="${c.email || ""}" placeholder="not found — add if you look it up" />`
+        : c.email
+        ? c.email
+        : `<span class="no-email">not found</span>`;
+      const checkbox = opts.checkable ? `<td><input type="checkbox" class="cand-check" checked /></td>` : "";
+      return `
+        <tr data-id="${c.id}">
+          ${checkbox}
+          <td>${c.companyName || "(no name)"}</td>
+          <td>${c.phone || ""}</td>
+          <td>${c.website ? `<a href="${c.website}" target="_blank" rel="noopener">${c.website.replace(/^https?:\/\//, "")}</a>` : ""}</td>
+          <td>${c.address || ""}</td>
+          <td>${emailCell}</td>
+          <td>${c.town || ""}</td>
+        </tr>`;
+    })
+    .join("");
+  const headCheck = opts.checkable ? "<th></th>" : "";
+  wrap.innerHTML = `<table class="candidates"><thead><tr>${headCheck}<th>Company</th><th>Phone</th><th>Website</th><th>Address</th><th>Email</th><th>Town</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+  if (opts.editableEmail) {
+    wrap.querySelectorAll(".cand-email").forEach((input) => {
+      input.addEventListener("change", async () => {
+        const id = input.closest("tr").dataset.id;
+        try {
+          await updateCandidateCallable({ id, email: input.value.trim() });
+        } catch (err) {
+          alert(`Couldn't save that email: ${err.message}`);
+        }
+      });
+    });
+  }
+}
+
+async function loadCandidates() {
+  const msg = document.getElementById("candidates-message");
+  const queueBtn = document.getElementById("queue-checked-btn");
+  const rejectBtn = document.getElementById("reject-checked-btn");
+  try {
+    const { data } = await listCandidatesCallable({ status: "candidate" });
+    renderCandidatesTable(data.candidates, "candidates-table-wrap", { checkable: true, editableEmail: true });
+    showMessage(msg, `${data.candidates.length} awaiting review.`, "info");
+    const has = data.candidates.length > 0;
+    queueBtn.style.display = has ? "inline-block" : "none";
+    rejectBtn.style.display = has ? "inline-block" : "none";
+  } catch (err) {
+    showMessage(msg, err.message, "error");
+  }
+}
+document.getElementById("load-candidates-btn").addEventListener("click", loadCandidates);
+
+function getCheckedCandidateIds() {
+  return [...document.querySelectorAll("#candidates-table-wrap tr[data-id]")]
+    .filter((tr) => tr.querySelector(".cand-check")?.checked)
+    .map((tr) => tr.dataset.id);
+}
+
+document.getElementById("queue-checked-btn").addEventListener("click", async () => {
+  const ids = getCheckedCandidateIds();
+  if (ids.length === 0) return;
+  try {
+    await setCandidateStatusCallable({ ids, status: "queued" });
+    loadCandidates();
+    loadQueue();
+  } catch (err) {
+    showMessage(document.getElementById("candidates-message"), err.message, "error");
+  }
+});
+
+document.getElementById("reject-checked-btn").addEventListener("click", async () => {
+  const ids = getCheckedCandidateIds();
+  if (ids.length === 0) return;
+  if (!confirm(`Reject ${ids.length} business(es)? They won't show up again even if you search this town again.`)) return;
+  try {
+    await setCandidateStatusCallable({ ids, status: "rejected" });
+    loadCandidates();
+  } catch (err) {
+    showMessage(document.getElementById("candidates-message"), err.message, "error");
+  }
+});
+
+// ---------------------------------------------------------------------
+// This week's queue (status: queued) — read-only view; these feed
+// outreachListLeads automatically, same as unpaid listings / manual leads
+// ---------------------------------------------------------------------
+async function loadQueue() {
+  const msg = document.getElementById("queue-message");
+  try {
+    const { data } = await listCandidatesCallable({ status: "queued" });
+    renderCandidatesTable(data.candidates, "queue-table-wrap", { checkable: false, editableEmail: false });
+    const missingEmail = data.candidates.filter((c) => !c.email).length;
+    showMessage(
+      msg,
+      `${data.candidates.length} queued for this week.` + (missingEmail ? ` ${missingEmail} still need an email before they can be drafted.` : ""),
+      "info"
+    );
+  } catch (err) {
+    showMessage(msg, err.message, "error");
+  }
+}
+
+// ---------------------------------------------------------------------
 // Load today's candidate leads (Checkpoint 1 — nothing recorded yet)
 // ---------------------------------------------------------------------
 function defaultBody(lead) {
@@ -267,6 +444,7 @@ document.getElementById("load-leads-btn").addEventListener("click", async () => 
       const card = document.createElement("div");
       card.className = "lead-card";
       card.dataset.email = lead.email;
+      if (lead.candidateId) card.dataset.candidateId = lead.candidateId;
       card.innerHTML = `
         <label><input type="checkbox" class="lead-check" checked /> <strong>${lead.name || "(no name)"}</strong> — ${lead.email} — ${lead.town || "no town listed"} <span style="color:#888;">[${lead.source}]</span></label>
         <div class="lead-meta"></div>
@@ -303,6 +481,7 @@ document.getElementById("create-drafts-btn").addEventListener("click", async (e)
         to: card.dataset.email,
         subject: card.querySelector(".lead-subject").value.trim(),
         body: card.querySelector(".lead-body").value.trim(),
+        candidateId: card.dataset.candidateId || undefined,
       });
       statusEl.textContent = "✅ Draft created — review it in Gmail and label it Outreach/Approved when ready.";
       statusEl.className = "lead-status ok";
