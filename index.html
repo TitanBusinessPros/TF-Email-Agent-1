@@ -120,7 +120,12 @@
   <p><button id="unqueue-checked-btn" style="display:none;">Remove checked from queue</button></p>
 
   <h2>Today's leads to draft</h2>
-  <details class="help"><summary>How does drafting work?</summary>Checkpoint 1: nothing below is sent/recorded as "contacted" yet. Uncheck anyone you don't want, edit subject/body, then "Create drafts" (Checkpoint 2) — only creates real Gmail Drafts, still doesn't send. Label drafts "Outreach/Approved" in Gmail when ready to actually send.</details>
+  <details class="help"><summary>How does drafting work?</summary>Checkpoint 1: nothing below is sent/recorded as "contacted" yet. Uncheck anyone you don't want, edit subject/body, then "Create drafts" (Checkpoint 2) — only creates real Gmail Drafts, still doesn't send. Label drafts "Outreach/Approved" in Gmail (on that same account) when ready to actually send. Load again after drafting to get the next batch — already-drafted leads won't repeat.</details>
+  <label for="sender-select" style="font-weight:600;">Draft using:</label>
+  <select id="sender-select" style="padding:0.3rem;border-radius:4px;border:1px solid #aaa;font-size:0.85rem;">
+    <option value="primary">titanbusinesspros@gmail.com</option>
+    <option value="secondary">pollysfarmok@gmail.com</option>
+  </select>
   <button class="primary" id="load-leads-btn">Load today's leads</button>
   <div id="leads-message"></div>
   <div id="leads-container"></div>
@@ -514,6 +519,7 @@ document.getElementById("create-drafts-btn").addEventListener("click", async (e)
         subject: card.querySelector(".lead-subject").value.trim(),
         body: card.querySelector(".lead-body").value.trim(),
         candidateId: card.dataset.candidateId || undefined,
+        sender: document.getElementById("sender-select").value,
       });
       statusEl.textContent = "✅ Draft created — review it in Gmail and label it Outreach/Approved when ready.";
       statusEl.className = "lead-status ok";
