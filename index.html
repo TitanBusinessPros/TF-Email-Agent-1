@@ -58,10 +58,20 @@
     <span id="pause-status" style="font-size:0.9rem;color:#666;"></span>
   </p>
   <p style="font-size:0.9rem;color:#666;">
-    When paused, the automatic 9:00 AM sender skips every day (it checks this fresh
-    every time, not just once) — use this for a day off. It never sends on Sundays
-    either way, pause or not.
+    When paused, the automatic sender skips every day (it checks this fresh every
+    time, not just once) — use this for a day off. It never sends on Sundays either
+    way, pause or not.
   </p>
+
+  <label for="start-time" style="display:block;margin-top:1rem;font-weight:600;">Daily start time (Central)</label>
+  <p style="font-size:0.9rem;color:#666;margin-top:0;">
+    Each day, the first approved draft goes out within about 15 minutes after this
+    time, then one more every 10 minutes after that until that day's approved
+    drafts are done. Change this any time — e.g. set it to this afternoon to launch
+    today instead of waiting for tomorrow morning.
+  </p>
+  <p><input type="time" id="start-time" style="padding:0.4rem;border-radius:4px;border:1px solid #aaa;" /> <button id="save-start-time-btn">Save time</button></p>
+
   <label for="campaign-notes" style="display:block;margin-top:1rem;font-weight:600;">What are we selling right now?</label>
   <p style="font-size:0.9rem;color:#666;margin-top:0;">
     Plain English, your own words — services, current offers, whatever's true this
@@ -219,7 +229,7 @@ function renderPauseButton() {
   const status = document.getElementById("pause-status");
   if (currentPaused) {
     btn.textContent = "▶ Resume sending";
-    status.textContent = "Currently PAUSED — the 9:00 AM sender will skip every day until you resume.";
+    status.textContent = "Currently PAUSED — the automatic sender will skip every day until you resume.";
   } else {
     btn.textContent = "⏸ Take a day off (pause)";
     status.textContent = "Currently active — sending as normal (Mon–Sat only, never Sundays).";
@@ -231,6 +241,7 @@ async function loadSettings() {
     const { data } = await getSettingsCallable();
     currentPaused = !!data.paused;
     document.getElementById("campaign-notes").value = data.campaignNotes || "";
+    document.getElementById("start-time").value = data.startTime || "09:00";
     renderPauseButton();
   } catch (err) {
     showMessage(document.getElementById("settings-message"), err.message, "error");
@@ -244,6 +255,21 @@ document.getElementById("pause-toggle-btn").addEventListener("click", async () =
     currentPaused = !currentPaused;
     renderPauseButton();
     showMessage(msg, "Saved.", "info");
+  } catch (err) {
+    showMessage(msg, err.message, "error");
+  }
+});
+
+document.getElementById("save-start-time-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("settings-message");
+  const startTime = document.getElementById("start-time").value; // "HH:MM" from the native time input
+  if (!startTime) {
+    showMessage(msg, "Pick a time first.", "error");
+    return;
+  }
+  try {
+    await setSettingsCallable({ startTime });
+    showMessage(msg, `Saved — the sender checks every 15 minutes, so today's/tomorrow's first send will land within about 15 minutes after ${startTime} Central.`, "info");
   } catch (err) {
     showMessage(msg, err.message, "error");
   }
