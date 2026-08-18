@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Town Fuss — Outreach Admin</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; }
+  h1 { font-size: 1.4rem; }
+  button { cursor: pointer; padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #888; background: #f5f5f5; font-size: 0.95rem; }
+  button:hover { background: #eaeaea; }
+  button.primary { background: #2e6bd6; color: #fff; border-color: #2e6bd6; }
+  button.primary:hover { background: #2559b3; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #signed-out, #not-admin, #app { display: none; }
+  .lead-card { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  .lead-card.dropped { opacity: 0.4; }
+  .lead-meta { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
+  .lead-card input[type="text"], .lead-card textarea { width: 100%; box-sizing: border-box; padding: 0.4rem; border-radius: 4px; border: 1px solid #aaa; font-family: inherit; font-size: 0.95rem; }
+  .lead-card textarea { min-height: 6rem; margin-top: 0.4rem; }
+  .lead-status { font-size: 0.85rem; margin-top: 0.4rem; }
+  .lead-status.ok { color: #1a7a1a; }
+  .lead-status.err { color: #b3261e; }
+  #manual-form { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+  #manual-form input { padding: 0.4rem; border-radius: 4px; border: 1px solid #aaa; }
+  .message { padding: 0.6rem 0.9rem; border-radius: 6px; margin: 0.75rem 0; }
+  .message.error { background: #fbe4e2; color: #7a1f18; }
+  .message.info { background: #e3edfb; color: #1a3d7a; }
+  footer { margin-top: 2rem; font-size: 0.8rem; color: #888; }
+</style>
+</head>
+<body>
+
+<h1>Town Fuss — Outreach Admin</h1>
+
+<div id="signed-out">
+  <p>Sign in with the same Google account you use for the Town Fuss admin panel.</p>
+  <button class="primary" id="sign-in-btn">Sign in with Google</button>
+  <div id="signed-out-message"></div>
+</div>
+
+<div id="not-admin">
+  <p>Signed in, but this account isn't on Town Fuss's admin list — same permission check as the main site's admin panel.</p>
+  <button id="sign-out-btn-2">Sign out</button>
+</div>
+
+<div id="app">
+  <p><button id="sign-out-btn">Sign out</button></p>
+
+  <h2>Add a lead</h2>
+  <p style="font-size:0.9rem;color:#666;">Anyone you know about yourself — shows up in tomorrow's (or a re-run today's) candidate list, same as the old leads.csv.</p>
+  <form id="manual-form">
+    <input type="text" id="manual-name" placeholder="Business name" required />
+    <input type="email" id="manual-email" placeholder="Email" required />
+    <input type="text" id="manual-town" placeholder="Town" />
+    <input type="text" id="manual-notes" placeholder="Notes (optional)" />
+    <button type="submit">Add lead</button>
+  </form>
+  <div id="manual-message"></div>
+
+  <h2>Today's candidates</h2>
+  <p style="font-size:0.9rem;color:#666;">
+    Checkpoint 1: nothing below is sent or recorded as "contacted" yet. Uncheck anyone
+    you don't want to contact, edit the subject/body for anyone you keep, then use
+    "Create drafts" — that's Checkpoint 2, and it only creates real Gmail Drafts, it
+    doesn't send anything either. Review and label drafts "Outreach/Approved" in Gmail
+    itself when you're ready for them to actually go out.
+  </p>
+  <button class="primary" id="load-leads-btn">Load today's leads</button>
+  <div id="leads-message"></div>
+  <div id="leads-container"></div>
+  <p><button class="primary" id="create-drafts-btn" style="display:none;">Create drafts for checked leads</button></p>
+</div>
+
+<footer>
+  Internal tool — <a href="https://github.com/TitanBusinessPros/townfuss-outreach-admin" target="_blank" rel="noopener">source</a>.
+  Reads/writes go through Cloud Functions on the same Firebase project as the main Town Fuss app (town-talk-87ff7), gated by the same admin check.
+</footer>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+
+// Same public client config the main Town Fuss app (Pauls Valley edition)
+// already embeds in its own index.html — not a secret, protected by
+// Firestore/Storage rules + Cloud Functions admin checks, not by hiding
+// this object.
+const firebaseConfig = {
+  apiKey: "AIzaSyC0EfVQypjbEHRswbO-Np4lCQjFhmwEqrA",
+  authDomain: "town-talk-87ff7.firebaseapp.com",
+  projectId: "town-talk-87ff7",
+  storageBucket: "town-talk-87ff7.firebasestorage.app",
+  messagingSenderId: "95719537435",
+  appId: "1:95719537435:web:b496db2c2144adb3c831be",
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const functions = getFunctions(app);
+const googleProvider = new GoogleAuthProvider();
+
+const listLeadsCallable = httpsCallable(functions, "outreachListLeads");
+const addManualLeadCallable = httpsCallable(functions, "outreachAddManualLead");
+const createDraftCallable = httpsCallable(functions, "outreachCreateDraft");
+
+const signedOutEl = document.getElementById("signed-out");
+const notAdminEl = document.getElementById("not-admin");
+const appEl = document.getElementById("app");
+
+function showMessage(el, text, type) {
+  el.innerHTML = text ? `<div class="message ${type}">${text}</div>` : "";
+}
+
+document.getElementById("sign-in-btn").addEventListener("click", async () => {
+  try {
+    await signInWithPopup(auth, googleProvider);
+  } catch (err) {
+    showMessage(document.getElementById("signed-out-message"), err.message, "error");
+  }
+});
+document.getElementById("sign-out-btn").addEventListener("click", () => signOut(auth));
+document.getElementById("sign-out-btn-2").addEventListener("click", () => signOut(auth));
+
+onAuthStateChanged(auth, async (user) => {
+  signedOutEl.style.display = "none";
+  notAdminEl.style.display = "none";
+  appEl.style.display = "none";
+
+  if (!user) {
+    signedOutEl.style.display = "block";
+    return;
+  }
+
+  // Custom claim set by the main app's syncAdminClaim function whenever
+  // admins/{uid} changes — force a fresh token so a claim granted after
+  // this browser last signed in is actually picked up, not a stale cached one.
+  const tokenResult = await user.getIdTokenResult(true);
+  if (!tokenResult.claims.admin) {
+    notAdminEl.style.display = "block";
+    return;
+  }
+  appEl.style.display = "block";
+});
+
+// ---------------------------------------------------------------------
+// Add a lead manually
+// ---------------------------------------------------------------------
+document.getElementById("manual-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById("manual-message");
+  showMessage(msg, "", "");
+  const name = document.getElementById("manual-name").value.trim();
+  const email = document.getElementById("manual-email").value.trim();
+  const town = document.getElementById("manual-town").value.trim();
+  const notes = document.getElementById("manual-notes").value.trim();
+  try {
+    await addManualLeadCallable({ name, email, town, notes });
+    showMessage(msg, `Added ${name || email}.`, "info");
+    document.getElementById("manual-form").reset();
+  } catch (err) {
+    showMessage(msg, err.message, "error");
+  }
+});
+
+// ---------------------------------------------------------------------
+// Load today's candidate leads (Checkpoint 1 — nothing recorded yet)
+// ---------------------------------------------------------------------
+function defaultBody(lead) {
+  const town = lead.town ? ` in ${lead.town}` : "";
+  const name = lead.name || "there";
+  return `Hi ${name},\n\nI noticed your business${town} started a listing on Town Fuss but never finished it up. Town Fuss is a local community app — I'd love to help you get it live, and answer any questions on a quick call if that's useful.\n\nWorth 10 minutes this week?\n\nThanks,\nTitan Business Pros`;
+}
+
+document.getElementById("load-leads-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("leads-message");
+  const container = document.getElementById("leads-container");
+  const createBtn = document.getElementById("create-drafts-btn");
+  showMessage(msg, "Loading…", "info");
+  container.innerHTML = "";
+  createBtn.style.display = "none";
+
+  try {
+    const { data } = await listLeadsCallable();
+    const leads = data.leads || [];
+    showMessage(msg, `${leads.length} lead(s) found (${data.totalCandidatesFound} candidates total before the ${leads.length ? leads.length : 10}/day cap). Nothing recorded as contacted yet.`, "info");
+
+    if (leads.length === 0) {
+      container.innerHTML = "<p>No candidates today — add some above, or check back once more businesses sign up.</p>";
+      return;
+    }
+
+    leads.forEach((lead, i) => {
+      const card = document.createElement("div");
+      card.className = "lead-card";
+      card.dataset.email = lead.email;
+      card.innerHTML = `
+        <label><input type="checkbox" class="lead-check" checked /> <strong>${lead.name || "(no name)"}</strong> — ${lead.email} — ${lead.town || "no town listed"} <span style="color:#888;">[${lead.source}]</span></label>
+        <div class="lead-meta"></div>
+        <input type="text" class="lead-subject" value="Quick question about your Town Fuss listing" />
+        <textarea class="lead-body">${defaultBody(lead)}</textarea>
+        <div class="lead-status"></div>
+      `;
+      const checkbox = card.querySelector(".lead-check");
+      checkbox.addEventListener("change", () => card.classList.toggle("dropped", !checkbox.checked));
+      container.appendChild(card);
+    });
+
+    createBtn.style.display = "inline-block";
+  } catch (err) {
+    showMessage(msg, err.message, "error");
+  }
+});
+
+// ---------------------------------------------------------------------
+// Create drafts for whichever cards are still checked (Checkpoint 2 setup —
+// this only creates Gmail Drafts, it never sends anything itself)
+// ---------------------------------------------------------------------
+document.getElementById("create-drafts-btn").addEventListener("click", async (e) => {
+  const btn = e.target;
+  btn.disabled = true;
+  const cards = [...document.querySelectorAll(".lead-card")].filter((c) => c.querySelector(".lead-check").checked);
+
+  for (const card of cards) {
+    const statusEl = card.querySelector(".lead-status");
+    statusEl.textContent = "Creating draft…";
+    statusEl.className = "lead-status";
+    try {
+      await createDraftCallable({
+        to: card.dataset.email,
+        subject: card.querySelector(".lead-subject").value.trim(),
+        body: card.querySelector(".lead-body").value.trim(),
+      });
+      statusEl.textContent = "✅ Draft created — review it in Gmail and label it Outreach/Approved when ready.";
+      statusEl.className = "lead-status ok";
+      card.querySelector(".lead-check").disabled = true;
+    } catch (err) {
+      statusEl.textContent = `❌ ${err.message}`;
+      statusEl.className = "lead-status err";
+    }
+  }
+  btn.disabled = false;
+});
+</script>
+</body>
+</html>
