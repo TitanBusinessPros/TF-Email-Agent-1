@@ -38,7 +38,7 @@ parts work today. **Creating drafts won't work yet** — it needs a Gmail
 API OAuth connection, done once:
 
 1. Verify `info@titanbusinesspros.com` as a "Send mail as" address under
-   `titanbuesinesspros@gmail.com` in Gmail settings.
+   `titanbusinesspros@gmail.com` in Gmail settings.
 2. Create a Google Cloud OAuth client (Gmail API enabled, Desktop app
    type) — see the main repo's `outreach/README.md` Step 2 for the exact
    click-path (same Google Cloud project/credentials work here).

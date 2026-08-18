@@ -2,6 +2,6 @@
   "hosting": {
     "site": "townfuss-outreach",
     "public": ".",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "README.md"]
+    "ignore": ["firebase.json", "**/.*", "**/.git/**", "**/node_modules/**", "README.md"]
   }
 }
