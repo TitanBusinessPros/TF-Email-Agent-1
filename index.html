@@ -71,7 +71,9 @@
   <p><button id="sign-out-btn">Sign out</button></p>
 
   <h2>Controls</h2>
-  <p class="step">⬇ Pick who's sending, pause/resume, set start time.</p>
+  <p class="step">STEP 5 (after you've drafted a lead below): come back here, set that account's start time.</p>
+  <p class="step">STEP 6: Make sure it's not paused.</p>
+  <p class="step">STEP 7: Watch for the countdown right here, then check that account's Sent folder.</p>
   <details class="help"><summary>More detail</summary>Each agent (Gmail account) has its own pause button and start time — but only one is ever allowed to actually be sending at a time, even if their start times overlap. If Agent B's time arrives while Agent A is still mid-batch, Agent B just waits and keeps checking every 15 min until Agent A finishes, then starts automatically. Never sends on Sundays either way, for any agent.</details>
   <div id="agents-list"></div>
 
@@ -117,7 +119,10 @@
   <p><button id="unqueue-checked-btn" style="display:none;">Remove checked from queue</button></p>
 
   <h2>Today's leads to draft</h2>
-  <p class="step">📨 Edit the email, then click "Create drafts." It sends itself — no Gmail needed.</p>
+  <p class="step">STEP 1: Click "Load today's leads" below.</p>
+  <p class="step">STEP 2: Check the box on the lead(s) you want.</p>
+  <p class="step">STEP 3: Pick which account below.</p>
+  <p class="step">STEP 4: Edit the subject/body if you want, then click "Create drafts." It's queued to send now — no Gmail visit needed. Then go back up to Controls for steps 5-7.</p>
   <details class="help"><summary>More detail</summary>Nothing above is sent/recorded as "contacted" until you click Create drafts — editing here IS the approval step. Once created, each draft is auto-labeled and queued; that account's automatic sender picks it up once it's active and its start time has passed. Load again after drafting to get the next batch — already-drafted leads won't repeat.</details>
   <label for="sender-select" style="font-weight:600;">Draft using:</label>
   <select id="sender-select" style="padding:0.3rem;border-radius:4px;border:1px solid #aaa;font-size:0.85rem;">
