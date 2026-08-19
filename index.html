@@ -141,6 +141,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+import { getFirestore, doc, onSnapshot, collection, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Same public client config the main Town Fuss app (Pauls Valley edition)
 // already embeds in its own index.html — not a secret, protected by
@@ -158,6 +159,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const functions = getFunctions(app);
+const dbClient = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
 const listLeadsCallable = httpsCallable(functions, "outreachListLeads");
@@ -210,7 +212,72 @@ onAuthStateChanged(auth, async (user) => {
   loadSettings();
   loadCandidates();
   loadQueue();
+  startLiveListeners();
 });
+
+// ---------------------------------------------------------------------
+// Live confirmation — a real "next send in MM:SS" countdown (from an
+// actual timestamp Apps Script reports when it schedules a trigger, not
+// a guess) and a per-lead "✅ Sent" confirmation once a real send
+// actually happens. Both driven by Firestore's own live listeners
+// (onSnapshot), so every open tab updates instantly, no polling/refresh
+// needed.
+// ---------------------------------------------------------------------
+const nextSendAtByAgent = {}; // { agentId: millis|null }
+
+function startLiveListeners() {
+  onSnapshot(doc(dbClient, "outreachSettings", "config"), (snap) => {
+    const agents = snap.data()?.agents || {};
+    Object.entries(agents).forEach(([id, data]) => {
+      nextSendAtByAgent[id] = data.nextSendAt?.toMillis ? data.nextSendAt.toMillis() : null;
+    });
+    renderAllCountdowns();
+  });
+
+  // Most-recent 50 send events, matched client-side against whatever
+  // lead cards are currently on screen by recipient email.
+  const sentQuery = query(collection(dbClient, "outreachSentEvents"), orderBy("sentAt", "desc"), limit(50));
+  onSnapshot(sentQuery, (snap) => {
+    snap.docChanges().forEach((change) => {
+      if (change.type !== "added") return;
+      const data = change.doc.data();
+      const card = document.querySelector(`.lead-card[data-email="${CSS.escape(data.to)}"]`);
+      if (!card) return; // not currently loaded on screen — nothing to update
+      const statusEl = card.querySelector(".lead-status");
+      if (data.status === "sent") {
+        const when = data.sentAt?.toDate ? data.sentAt.toDate().toLocaleTimeString() : "";
+        statusEl.textContent = `📤 Confirmed sent at ${when}`;
+        statusEl.className = "lead-status ok";
+      } else {
+        statusEl.textContent = `❌ Send failed: ${data.status}`;
+        statusEl.className = "lead-status err";
+      }
+    });
+  });
+
+  setInterval(renderAllCountdowns, 1000);
+}
+
+function renderAllCountdowns() {
+  document.querySelectorAll("#agents-list > div[data-agent-id]").forEach((card) => {
+    const agentId = card.dataset.agentId;
+    const el = card.querySelector(".agent-next-send");
+    if (!el) return;
+    const nextAt = nextSendAtByAgent[agentId];
+    if (!nextAt) {
+      el.textContent = "";
+      return;
+    }
+    const remainingMs = nextAt - Date.now();
+    if (remainingMs <= 0) {
+      el.textContent = "⏳ Sending now…";
+      return;
+    }
+    const mins = Math.floor(remainingMs / 60000);
+    const secs = Math.floor((remainingMs % 60000) / 1000);
+    el.textContent = `⏳ Next send in ${mins}:${String(secs).padStart(2, "0")}`;
+  });
+}
 
 // ---------------------------------------------------------------------
 // Controls: one card per agent (pause + start time), auto-saving
@@ -245,6 +312,8 @@ function renderAgentCard(agent) {
       <input type="time" class="agent-start-time" style="padding:0.25rem;border-radius:4px;border:1px solid #aaa;font-size:0.8rem;" />
     </label>
     <span class="agent-time-status" style="font-size:0.75rem;color:#888;"></span>
+    <br />
+    <span class="agent-next-send" style="font-size:0.9rem;font-weight:700;color:#1a5c1a;"></span>
   `;
 
   function renderPauseButton() {
@@ -643,7 +712,7 @@ document.getElementById("create-drafts-btn").addEventListener("click", async (e)
         candidateId: card.dataset.candidateId || undefined,
         sender: document.getElementById("sender-select").value,
       });
-      statusEl.textContent = "✅ Drafted and queued to send automatically — no Gmail label needed.";
+      statusEl.textContent = "⏳ Drafted and queued — will update to a confirmed send automatically, no refresh needed.";
       statusEl.className = "lead-status ok";
       // Deliberately NOT disabling the checkbox afterward — full control
       // to check/uncheck stays available even after a successful draft.
