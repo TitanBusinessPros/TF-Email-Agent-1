@@ -590,13 +590,17 @@ document.getElementById("load-leads-btn").addEventListener("click", async () => 
       card.dataset.email = lead.email;
       if (lead.candidateId) card.dataset.candidateId = lead.candidateId;
       card.innerHTML = `
-        <label><input type="checkbox" class="lead-check" checked /> <strong>${lead.name || "(no name)"}</strong> — ${lead.email} — ${lead.town || "no town listed"} <span style="color:#888;">[${lead.source}]</span></label>
+        <label><input type="checkbox" class="lead-check" /> <strong>${lead.name || "(no name)"}</strong> — ${lead.email} — ${lead.town || "no town listed"} <span style="color:#888;">[${lead.source}]</span></label>
         <div class="lead-meta"></div>
         <input type="text" class="lead-subject" value="${defaultSubject(lead).replace(/"/g, "&quot;")}" />
         <textarea class="lead-body">${defaultBody(lead)}</textarea>
         <div class="lead-status"></div>
       `;
       const checkbox = card.querySelector(".lead-check");
+      // Unchecked by default — you have to actively pick who gets a
+      // draft, not un-pick who doesn't. Matters more now that "Create
+      // drafts" auto-queues to send, not just creates.
+      card.classList.add("dropped");
       checkbox.addEventListener("change", () => card.classList.toggle("dropped", !checkbox.checked));
       container.appendChild(card);
     });
