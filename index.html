@@ -45,6 +45,7 @@
   table.candidates .col-address { width: 20%; }
   table.candidates .col-email { width: 18%; }
   table.candidates .col-town { width: 10%; }
+  .step { font-size: 1.15rem; font-weight: 800; margin: 0.3rem 0 0.5rem; color: #12315a; }
   .message { padding: 0.4rem 0.6rem; border-radius: 5px; margin: 0.4rem 0; font-size: 0.85rem; }
   .message.error { background: #fbe4e2; color: #7a1f18; }
   .message.info { background: #e3edfb; color: #1a3d7a; }
@@ -70,16 +71,17 @@
   <p><button id="sign-out-btn">Sign out</button></p>
 
   <h2>Controls</h2>
-  <details class="help"><summary>How do multiple agents work together?</summary>Each agent (Gmail account) has its own pause button and start time — but only one is ever allowed to actually be sending at a time, even if their start times overlap. If Agent B's time arrives while Agent A is still mid-batch, Agent B just waits and keeps checking every 15 min until Agent A finishes, then starts automatically. Never sends on Sundays either way, for any agent.</details>
+  <p class="step">⬇ Pick who's sending, pause/resume, set start time.</p>
+  <details class="help"><summary>More detail</summary>Each agent (Gmail account) has its own pause button and start time — but only one is ever allowed to actually be sending at a time, even if their start times overlap. If Agent B's time arrives while Agent A is still mid-batch, Agent B just waits and keeps checking every 15 min until Agent A finishes, then starts automatically. Never sends on Sundays either way, for any agent.</details>
   <div id="agents-list"></div>
 
+  <p class="step">✏ Tell Claude what you're selling — saves itself.</p>
   <label for="campaign-notes" style="display:block;margin-top:0.5rem;font-weight:600;font-size:0.85rem;">What are we selling right now? <span id="campaign-notes-save-status" style="font-weight:normal;font-size:0.75rem;color:#888;"></span></label>
-  <details class="help" open><summary>Why this box exists</summary>Plain English, your own words. Claude reads this before writing each batch — update it whenever the pitch changes instead of re-explaining it in chat. Saves automatically a couple seconds after you stop typing — no button to remember to click.</details>
   <textarea id="campaign-notes" style="width:100%;min-height:4rem;padding:0.4rem;border-radius:4px;border:1px solid #aaa;font-family:inherit;font-size:0.85rem;"></textarea>
   <div id="settings-message"></div>
 
   <h2>Add a lead</h2>
-  <details class="help"><summary>What's this for?</summary>Anyone you know about yourself — shows up in the candidate list, same as the old leads.csv.</details>
+  <p class="step">➕ Know a business? Add it here.</p>
   <form id="manual-form">
     <input type="text" id="manual-name" placeholder="Business name" required />
     <input type="email" id="manual-email" placeholder="Email" required />
@@ -90,7 +92,7 @@
   <div id="manual-message"></div>
 
   <h2>Find businesses in a town</h2>
-  <details class="help"><summary>How does this work?</summary>Real businesses via Google — name, phone, website, address, and an email ONLY if actually found on the business's own site (never guessed). Results land below to review before anything's queued.</details>
+  <p class="step">🔍 Type a town. Click Find. Never guesses emails.</p>
   <form id="generate-form" style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;">
     <input type="text" id="generate-town" placeholder="Town or city, e.g. Guthrie, OK" required style="flex:1;min-width:180px;padding:0.3rem;border-radius:4px;border:1px solid #aaa;font-size:0.85rem;" />
     <button type="submit" class="primary">Find 60 businesses</button>
@@ -98,7 +100,7 @@
   <div id="generate-message"></div>
 
   <h2>Review new businesses <button id="load-candidates-btn" style="font-weight:normal;">Refresh</button></h2>
-  <details class="help"><summary>What do I do here?</summary>Check the good ones and add them to this week's queue. Anything unchecked just stays here — nothing's discarded unless you click "Reject checked." Emails are editable — fill one in if you look it up yourself.</details>
+  <p class="step">✅ Check the good ones → "Add checked to queue."</p>
   <div id="candidates-message"></div>
   <p><button class="select-all-btn" data-target="candidates-table-wrap" style="display:none;">Select all</button> <button class="deselect-all-btn" data-target="candidates-table-wrap" style="display:none;">Deselect all</button></p>
   <div id="candidates-table-wrap" style="overflow-x:auto;"></div>
@@ -108,14 +110,15 @@
   </p>
 
   <h2>This week's queue</h2>
-  <details class="help"><summary>What is this?</summary>Approved businesses waiting to be drafted — feeds into "Today's leads to draft" below automatically. Emails are editable here too — add one in for anyone missing it.</details>
+  <p class="step">📋 Ready to draft. Missing an email? Type it in.</p>
   <div id="queue-message"></div>
   <p><button class="select-all-btn" data-target="queue-table-wrap" style="display:none;">Select all</button> <button class="deselect-all-btn" data-target="queue-table-wrap" style="display:none;">Deselect all</button></p>
   <div id="queue-table-wrap" style="overflow-x:auto;"></div>
   <p><button id="unqueue-checked-btn" style="display:none;">Remove checked from queue</button></p>
 
   <h2>Today's leads to draft</h2>
-  <details class="help"><summary>How does drafting work?</summary>Checkpoint 1: nothing below is sent/recorded as "contacted" yet. Uncheck anyone you don't want, edit subject/body, then "Create drafts" (Checkpoint 2) — only creates real Gmail Drafts, still doesn't send. Label drafts "Outreach/Approved" in Gmail (on that same account) when ready to actually send. Load again after drafting to get the next batch — already-drafted leads won't repeat.</details>
+  <p class="step">📨 Edit the email, then click "Create drafts." It sends itself — no Gmail needed.</p>
+  <details class="help"><summary>More detail</summary>Nothing above is sent/recorded as "contacted" until you click Create drafts — editing here IS the approval step. Once created, each draft is auto-labeled and queued; that account's automatic sender picks it up once it's active and its start time has passed. Load again after drafting to get the next batch — already-drafted leads won't repeat.</details>
   <label for="sender-select" style="font-weight:600;">Draft using:</label>
   <select id="sender-select" style="padding:0.3rem;border-radius:4px;border:1px solid #aaa;font-size:0.85rem;">
     <option value="primary">titanbusinesspros@gmail.com</option>
@@ -636,9 +639,10 @@ document.getElementById("create-drafts-btn").addEventListener("click", async (e)
         candidateId: card.dataset.candidateId || undefined,
         sender: document.getElementById("sender-select").value,
       });
-      statusEl.textContent = "✅ Draft created — review it in Gmail and label it Outreach/Approved when ready.";
+      statusEl.textContent = "✅ Drafted and queued to send automatically — no Gmail label needed.";
       statusEl.className = "lead-status ok";
-      card.querySelector(".lead-check").disabled = true;
+      // Deliberately NOT disabling the checkbox afterward — full control
+      // to check/uncheck stays available even after a successful draft.
     } catch (err) {
       statusEl.textContent = `❌ ${err.message}`;
       statusEl.className = "lead-status err";
